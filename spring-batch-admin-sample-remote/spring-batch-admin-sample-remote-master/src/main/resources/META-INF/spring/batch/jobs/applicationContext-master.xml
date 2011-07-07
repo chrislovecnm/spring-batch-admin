@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:batch="http://www.springframework.org/schema/batch"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc"
+	xmlns:integration="http://www.springframework.org/schema/integration"
+	xmlns:task="http://www.springframework.org/schema/task" xmlns:jms="http://www.springframework.org/schema/jms"
+	xmlns:int-jms="http://www.springframework.org/schema/integration/jms"
+	xmlns:int-stream="http://www.springframework.org/schema/integration/stream"
+	xmlns:p="http://www.springframework.org/schema/p" xmlns:amq="http://activemq.apache.org/schema/core"
+	xmlns:aop="http://www.springframework.org/schema/aop" xmlns:util="http://www.springframework.org/schema/util"
+	xsi:schemaLocation="http://www.springframework.org/schema/jdbc http://www.springframework.org/schema/jdbc/spring-jdbc-3.0.xsd
+		http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-3.0.xsd
+		http://www.springframework.org/schema/jms http://www.springframework.org/schema/jms/spring-jms-3.0.xsd
+		http://www.springframework.org/schema/integration http://www.springframework.org/schema/integration/spring-integration-2.0.xsd
+		http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task-3.0.xsd
+		http://www.springframework.org/schema/integration/jms http://www.springframework.org/schema/integration/jms/spring-integration-jms-2.0.xsd
+		http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core-5.5.0.xsd
+		http://www.springframework.org/schema/integration/stream http://www.springframework.org/schema/integration/stream/spring-integration-stream-2.0.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+		http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-3.0.xsd
+		http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch-2.1.xsd">
+
+	<!-- Batch job that is configured as a remote job -->
+	<!-- The bean masterChunkHandler that is below transforms this -->
+	<!-- Job into a remote batch job. -->
+	<job id="footballJob" xmlns="http://www.springframework.org/schema/batch">
+		<!-- TODO finish the gameLoad and other steps -->
+		<!-- step id="playerload" next="gameLoad" -->
+		<step id="playerload">
+			<tasklet>
+				<chunk reader="playerFileItemReader" writer="playerWriter"
+					commit-interval="2" />
+			</tasklet>
+		</step>
+		<!-- TODO configure the rest of this batch -->
+		<!-- <step id="gameLoad" next="playerSummarization"> <tasklet> <chunk reader="gameFileItemReader" 
+			writer="gameWriter" commit-interval="${job.commit.interval}" /> </tasklet> 
+			</step> <step id="playerSummarization" parent="summarizationStep" /> -->
+	</job>
+
+	<!-- Item Reader for the batch job on the master -->
+	<bean id="playerFileItemReader" class="org.springframework.batch.item.file.FlatFileItemReader"
+		p:resource="classpath:data/footballjob/input/player-small1.csv"
+		p:lineMapper-ref="lineMapper" />
+
+	<!-- line mapper used by the playerFileItemReader -->
+	<bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper"
+		id="lineMapper" p:lineTokenizer-ref="delimitedLineTokenizer"
+		p:fieldSetMapper-ref="playerFieldSetMapper" />
+
+	<!-- tokenizer used by the lineMapper -->
+	<bean id="delimitedLineTokenizer"
+		class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+		p:names="ID,lastName,firstName,position,birthYear,debutYear" />
+
+	<!-- field set mapper used by the lineMapper -->
+	<bean id="playerFieldSetMapper"
+		class="org.springframework.batch.sample.domain.football.internal.PlayerFieldSetMapper" />
+
+	<!-- Item writer that is used on the slaves -->
+	<bean id="playerWriter"
+		class="org.springframework.batch.sample.domain.football.internal.PlayerItemWriter"
+		p:playerDao-ref="playerDao" />
+
+	<!-- doa used by the player writer -->
+	<!-- TODO use annotations for some of these beans?? -->
+	<bean
+		class="org.springframework.batch.sample.domain.football.internal.JdbcPlayerDao"
+		p:dataSource-ref="dataSource" id="playerDao" />
+
+	<!-- Messaging gateway for the remote chunking -->
+	<!-- Sends and receive messages from the messaging middleware -->
+	<bean id="messagingGateway" class="org.springframework.integration.core.MessagingTemplate"
+		p:defaultChannel-ref="requests" p:receiveTimeout="1000" />
+
+	<!-- channel adapter that connects to requests -->
+	<int-jms:outbound-channel-adapter
+		connection-factory="connectionFactory" channel="requests"
+		destination-name="requests" />
+
+	<!-- Channels for remote chunking -->
+	<!-- Requests that connects to the slaves -->
+	<integration:channel id="requests" />
+
+	<!-- Return messages for the ChunkMessageChannelItemWriter -->
+	<integration:channel id="incoming" />
+
+	<!-- TODO why are we doing this?? -->
+	<integration:transformer input-channel="incoming"
+		output-channel="replies" ref="headerExtractor" method="extract" />
+
+	<bean id="headerExtractor"
+		class="org.springframework.batch.integration.chunk.JmsRedeliveredExtractor" />
+
+	<!-- We use a direct channel for requests then the replies can come in -->
+	<!-- on a thread-local. -->
+	<!-- Receive and handles messages from the reply destination. -->
+	<integration:channel id="replies" scope="thread">
+		<integration:queue />
+		<!-- TODO we are we even using an interceptor?? -->
+		<integration:interceptors>
+			<bean id="pollerInterceptor"
+				class="org.springframework.batch.integration.chunk.MessageSourcePollerInterceptor"
+				p:channel-ref="incoming">
+				<property name="messageSource">
+					<!-- TODO should we be using JmsMessageDrivenEndpoint? -->
+					<bean
+						class="org.springframework.integration.jms.JmsDestinationPollingSource">
+						<constructor-arg ref="jmsTemplate" />
+					</bean>
+				</property>
+			</bean>
+		</integration:interceptors>
+	</integration:channel>
+
+
+	<!-- jms template used by the pollerInterceptor in the channel -->
+	<bean id="jmsTemplate" class="org.springframework.jms.core.JmsTemplate"
+		p:connectionFactory-ref="connectionFactory" p:defaultDestinationName="replies"
+		p:receiveTimeout="100" />
+
+	<bean class="org.springframework.jdbc.core.JdbcTemplate">
+		<constructor-arg ref="dataSource" />
+	</bean>
+
+	<!-- Remote slave JMS configuration -->
+	<!-- JMS container for the requests channel -->
+	<!-- In this configuration the master also runs slave -->
+	<!-- components as well. Remove this to have on slaves -->
+	<jms:listener-container connection-factory="connectionFactory"
+		transaction-manager="transactionManager" acknowledge="transacted"
+		concurrency="1-20">
+		<!-- JMS listener that will run on the slave -->
+		<jms:listener destination="requests"
+			response-destination="replies" ref="chunkHandler" method="handleChunk" />
+	</jms:listener-container>
+
+	<!-- RemoteChunkHandlerFactoryBean class is responsible for configuring -->
+	<!-- the step for remote chunking. It converts an existing chunk-oriented -->
+	<!-- step into a remote chunk oriented step. -->
+	<!-- This chunk processor writes chunks to a message channel. -->
+	<!-- You have to modify the chunkhandler in the slave if you do not -->
+	<!-- have the job configured in the application context. See the -->
+	<!-- applicationContextl-slave.xml for an example. -->
+	<bean id="chunkHandler"
+		class="org.springframework.batch.integration.chunk.RemoteChunkHandlerFactoryBean"
+		p:chunkWriter-ref="chunkWriter" p:step-ref="playerload" />
+
+	<!-- Writes chunks to the slave(s) listening to the jms queue -->
+	<!-- This writer is configured to use the above gateway -->
+	<bean id="chunkWriter"
+		class="org.springframework.batch.integration.chunk.ChunkMessageChannelItemWriter"
+		p:messagingOperations-ref="messagingGateway" p:maxWaitTimeouts="10"
+		p:replyChannel-ref="replies" />
+
+	<bean id="transactionManager"
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager"
+		p:dataSource-ref="dataSource" />
+
+	<bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource"
+		p:driverClassName="org.h2.Driver"
+		p:url="jdbc:h2:${java.io.tmpdir}/remote-example;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE"
+		p:username="sa" p:password="" p:initialSize="5" p:maxActive="20" />
+
+
+	<!-- this is for the custom scope on the integration:channel -->
+	<bean class="org.springframework.beans.factory.config.CustomScopeConfigurer"
+		p:scopes-ref="scopes" />
+
+	<util:map id="scopes">
+		<entry key="thread">
+			<bean class="org.springframework.context.support.SimpleThreadScope" />
+		</entry>
+	</util:map>
+
+	<!-- ActiveMQ JMS Setup -->
+	<amq:broker useJmx="false" persistent="true" id="brokerService"
+		brokerName="localhost">
+		<amq:persistenceAdapter>
+			<amq:memoryPersistenceAdapter />
+		</amq:persistenceAdapter>
+		<amq:transportConnectors>
+			<amq:transportConnector uri="tcp://localhost:61616" />
+		</amq:transportConnectors>
+	</amq:broker>
+
+	<amq:connectionFactory id="connectionFactory"
+		brokerURL="tcp://localhost:61616" />
+		
+	<!-- TODO the properties do not seem to be working with batch-admin web app -->
+	<!-- <bean id="footballProperties" class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer"> 
+		<property name="properties"> <value> games.file.name=games-small.csv player.file.name=player-small1.csv 
+		job.commit.interval=2 </value> </property> <property name="systemPropertiesModeName" 
+		value="SYSTEM_PROPERTIES_MODE_OVERRIDE" /> <property name="ignoreUnresolvablePlaceholders" 
+		value="true" /> <property name="order" value="1" /> </bean> -->
+
+</beans>

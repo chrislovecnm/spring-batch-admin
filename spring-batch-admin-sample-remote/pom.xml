@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<artifactId>spring-batch-admin-sample-remote</artifactId>
+	<packaging>pom</packaging>
+	<description><![CDATA[JMS Remote batching example]]></description>
+	<parent>
+		<artifactId>spring-batch-admin-parent</artifactId>
+		<groupId>org.springframework.batch</groupId>
+		<version>1.2.1.BUILD-SNAPSHOT</version>
+		<relativePath>../spring-batch-admin-parent</relativePath>
+	</parent>
+	<name>JMS Remote chunking example parent pom</name>
+	<modules>
+	<module>spring-batch-admin-sample-remote-common</module>
+	<module>spring-batch-admin-sample-remote-slave</module>
+	<module>spring-batch-admin-sample-remote-master</module>
+	</modules>
+</project>

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:jms="http://www.springframework.org/schema/jms"
+	xmlns:amq="http://activemq.apache.org/schema/core"
+	xmlns:batch="http://www.springframework.org/schema/batch"
+	xmlns:p="http://www.springframework.org/schema/p"
+	xmlns:aop="http://www.springframework.org/schema/aop"
+	xsi:schemaLocation="http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-3.0.xsd
+		http://www.springframework.org/schema/jms http://www.springframework.org/schema/jms/spring-jms-3.0.xsd
+		http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core-5.5.0.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd">
+
+	<!-- Remote slave JMS configuration -->
+	<!-- JMS container for the requests channel -->
+	<jms:listener-container connection-factory="connectionFactory"
+		transaction-manager="transactionManager" acknowledge="transacted"
+		concurrency="1-20"  >
+		<!-- JMS listener that will run on the slave -->
+		<jms:listener destination="requests"
+			response-destination="replies" ref="slaveChunkHandler" method="handleChunk" />
+	</jms:listener-container>
+	
+	<!-- Item writer that is used on the slaves -->
+	<bean id="playerWriter"
+		class="org.springframework.batch.sample.domain.football.internal.PlayerItemWriter">
+		<property name="playerDao">
+			<bean
+				class="org.springframework.batch.sample.domain.football.internal.JdbcPlayerDao">
+				<property name="dataSource" ref="dataSource" />
+			</bean>
+		</property>
+	</bean>
+	
+	<!-- ChunkProcessChunkHandler to the writer bean -->
+	<bean id="slaveChunkHandler"
+		class="org.springframework.batch.integration.chunk.ChunkProcessorChunkHandler">
+		<property name="chunkProcessor">
+			<bean class="org.springframework.batch.core.step.item.SimpleChunkProcessor">
+				<property name="itemWriter" ref="playerWriter" />
+				<property name="itemProcessor">
+					<bean
+						class="org.springframework.batch.item.support.PassThroughItemProcessor" />
+				</property>
+			</bean>
+		</property>
+	</bean>
+	
+
+	<bean id="transactionManager"
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager"
+		p:dataSource-ref="dataSource" />
+
+	<bean id="dataSource" class="org.apache.commons.dbcp.BasicDataSource">
+		<property name="driverClassName" value="org.h2.Driver" />
+		<property name="url" value="jdbc:h2:/tmp/remote-example;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE" />
+		<property name="username" value="sa" />
+		<property name="password" value="" />
+		<property name="initialSize" value="5" />
+		<property name="maxActive" value="5" />
+	</bean>
+	
+	<bean id="logAdvice" class="org.springframework.batch.sample.common.LogAdvice" />
+	<bean id="eventAdvice"
+		class="org.springframework.batch.sample.jmx.StepExecutionApplicationEventAdvice" />
+
+	<aop:config>
+		<aop:aspect id="moduleLogging" ref="logAdvice">
+			<aop:after
+				pointcut="execution( * org.springframework.batch.item.ItemWriter+.write(..)) and args(item)"
+				method="doStronglyTypedLogging" />
+		</aop:aspect>
+		<aop:aspect ref="eventAdvice">
+			<aop:before
+				pointcut="execution( * org.springframework.batch..Step+.execute(..)) and args(stepExecution)"
+				method="before" />
+			<aop:after
+				pointcut="execution( * org.springframework.batch..Step+.execute(..)) and args(stepExecution)"
+				method="after" />
+			<aop:after-throwing throwing="t"
+				pointcut="execution( * org.springframework.batch..Step+.execute(..)) and args(stepExecution)"
+				method="onError" />
+		</aop:aspect>
+	</aop:config>
+	
+	<!-- if on different hosts this would be different -->
+	<amq:connectionFactory id="connectionFactory"
+		brokerURL="tcp://localhost:61616" />
+	
+</beans>

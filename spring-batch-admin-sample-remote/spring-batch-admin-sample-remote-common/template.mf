@@ -1,0 +1,4 @@
+Bundle-SymbolicName: org.springframework.batch.integration
+Bundle-Name: Spring Batch Sample Remote Common
+Bundle-Vendor: SpringSource
+Bundle-ManifestVersion: 2
