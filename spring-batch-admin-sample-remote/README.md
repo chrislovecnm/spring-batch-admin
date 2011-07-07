@@ -1,6 +1,7 @@
 # Spring-Batch and Spring-Batch-Admin Remote Chunking JMS Examples
 
 This is a simple example of how to use remote chunking.  To run the example:
+
 * run 'mvn install' in the directory with this readme file 
 * run 'mvn compile jetty:run -DENVIRONMENT=h2' in the spring-batch-admin-sample-remote-master directory
 * from another command prompt run 'mvn compile jetty:run in the spring-batch-admin-sample-remote-slave directory
